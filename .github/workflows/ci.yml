@@ -1,0 +1,47 @@
+name: compress-bench CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-and-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Build and self-test
+        run: ./install.sh
+
+      - name: Run smoke benchmark
+        run: |
+          ./bin/compress-bench run \
+            --codec all \
+            --level 1 \
+            --page-size 64K \
+            --threads 1,2 \
+            --mode both \
+            --working-set-pages 2 \
+            --warmup 10ms \
+            --duration 50ms \
+            --jsonl /tmp/compress-bench-ci.jsonl
+
+      - name: Validate JSONL
+        env:
+          JSONL_PATH: /tmp/compress-bench-ci.jsonl
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+
+          with open(os.environ["JSONL_PATH"], encoding="utf-8") as stream:
+              records = [json.loads(line) for line in stream if line.strip()]
+          assert len(records) == 8, len(records)
+          assert all(record["schema_version"] == 1 for record in records)
+          assert all(record["verification_passed"] for record in records)
+          PY
